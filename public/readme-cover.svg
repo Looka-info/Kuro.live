@@ -1,0 +1,29 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#050505"/>
+  <circle cx="964" cy="94" r="280" fill="url(#glowA)" opacity="0.55"/>
+  <circle cx="164" cy="536" r="330" fill="url(#glowB)" opacity="0.36"/>
+  <rect x="72" y="72" width="1056" height="486" rx="48" fill="url(#panel)" stroke="rgba(255,255,255,0.12)"/>
+  <circle cx="246" cy="315" r="126" fill="#0D0D10" stroke="#E5E5E8" stroke-width="10"/>
+  <path d="M204 232V398" stroke="#F5F5F7" stroke-width="36" stroke-linecap="round"/>
+  <path d="M226 315L318 232" stroke="#F5F5F7" stroke-width="36" stroke-linecap="round"/>
+  <path d="M226 315L334 398" stroke="#F5F5F7" stroke-width="36" stroke-linecap="round"/>
+  <path d="M350 247L326 286" stroke="#A1A1AA" stroke-width="14" stroke-linecap="round"/>
+  <text x="430" y="270" fill="#F5F5F7" font-family="Arial, sans-serif" font-size="86" font-weight="800" letter-spacing="-3">Kuru.live</text>
+  <text x="430" y="330" fill="#A1A1AA" font-family="Arial, sans-serif" font-size="28" font-weight="600" letter-spacing="4">ANIME DISCOVERY, REFINED</text>
+  <text x="430" y="394" fill="#D4D4D8" font-family="Arial, sans-serif" font-size="28">A graphite-black streaming interface with watch XP, comments,</text>
+  <text x="430" y="432" fill="#D4D4D8" font-family="Arial, sans-serif" font-size="28">episode embeds, watchlists, and AniList-powered metadata.</text>
+  <defs>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(964 94) rotate(90) scale(280)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(164 536) rotate(90) scale(330)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="panel" x1="72" y1="72" x2="1128" y2="558" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19191C"/>
+      <stop offset="1" stop-color="#09090B"/>
+    </linearGradient>
+  </defs>
+</svg>
