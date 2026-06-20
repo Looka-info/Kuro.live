@@ -70,6 +70,7 @@ export interface AniListMedia {
     }>;
   };
   trailer?: { id?: string; site?: string; thumbnail?: string };
+  externalLinks?: Array<{ site?: string; url?: string }>;
   streamingEpisodes?: Array<{
     title?: string;
     thumbnail?: string;
@@ -257,6 +258,7 @@ export async function getAniListById(id: number): Promise<{ Media: AniListMedia 
             node { id title { romaji english } coverImage { medium } format status }
           }
         }
+        externalLinks { site url }
         rankings { rank type context allTime season year }
       }
     }
@@ -295,6 +297,7 @@ export async function getAniListByMalId(idMal: number): Promise<{ Media: AniList
             node { id title { romaji english } coverImage { medium } format status }
           }
         }
+        externalLinks { site url }
         rankings { rank type context allTime season year }
       }
     }

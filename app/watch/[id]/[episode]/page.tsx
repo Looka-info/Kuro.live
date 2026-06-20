@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   AlertTriangle,
   ChevronLeft,
   CheckCircle,
-  List,
   RefreshCw,
   ShieldCheck,
   Trophy,
@@ -20,10 +20,12 @@ import {
   getTitle,
   getViewerProgress,
   hasWatchedEpisode,
+  stripHtml,
   type ViewerProgress,
 } from '@/lib/utils';
 import type { AniListMedia } from '@/lib/anilist';
 import { VideoPlayer } from '@/components/player/VideoPlayer';
+import { VidkingPlayer, type VidkingPlayerEventData } from '@/components/player/VidkingPlayer';
 import { useWatchlistStore } from '@/store';
 
 interface StreamResponse {
@@ -32,6 +34,13 @@ interface StreamResponse {
   episodeId?: string;
   server?: string;
 }
+
+type CommentEntry = {
+  id: number;
+  author: string;
+  text: string;
+  createdAt: string;
+};
 
 function getEpisodeNumber(title: string | undefined, index: number) {
   const match = title?.match(/(?:episode|ep)\s*\.?\s*(\d+)/i);
@@ -46,6 +55,9 @@ export default function WatchPage() {
   const updateWatchlistProgress = useWatchlistStore(state => state.updateProgress);
   const [viewerProgress, setViewerProgress] = useState<ViewerProgress | null>(null);
   const [episodeCounted, setEpisodeCounted] = useState(false);
+  const [comments, setComments] = useState<CommentEntry[]>([]);
+  const [commentText, setCommentText] = useState('');
+  const [activeServerIndex, setActiveServerIndex] = useState(0);
 
   const { data: anime, isLoading: isLoadingAnime } = useQuery<AniListMedia>({
     queryKey: ['anime', id],
@@ -91,6 +103,9 @@ export default function WatchPage() {
     retry: false,
   });
 
+  const searchParams = useSearchParams();
+  const useVidking = searchParams.get('player') === 'vidking';
+
   const title = anime ? getTitle(anime.title) : '';
   const totalEps = anime?.episodes || 0;
   const streamSources = streamData?.sources || [];
@@ -107,11 +122,104 @@ export default function WatchPage() {
       ? Array.from({ length: totalEps }, (_, index) => index + 1)
       : [epNum];
   const xpAnimeId = anime?.id || id;
+  const description = stripHtml(anime?.description);
+  const selectedStreamSource = streamSources[activeServerIndex] || streamSources[0];
+
+  useEffect(() => {
+    if (activeServerIndex >= streamSources.length) {
+      setActiveServerIndex(0);
+    }
+  }, [activeServerIndex, streamSources.length]);
+
+  const bannerImage = anime?.bannerImage || anime?.coverImage?.large || anime?.coverImage?.medium || '';
+  const ratingLabel = typeof anime?.averageScore === 'number' ? `★ ${(anime.averageScore / 10).toFixed(1)}` : null;
+  const metadataBadges = [
+    anime?.seasonYear ? String(anime.seasonYear) : null,
+    anime?.format || null,
+    anime?.episodes ? `${anime.episodes} eps` : null,
+  ].filter(Boolean) as string[];
+
+  const vidkingConfig = useMemo(() => {
+    if (!anime?.externalLinks?.length) return null;
+
+    const tmdbLink = anime.externalLinks.find(link =>
+      Boolean(link?.url?.includes('themoviedb.org')) || Boolean(link?.site?.toLowerCase().includes('tmdb'))
+    )?.url;
+    if (!tmdbLink) return null;
+
+    try {
+      const url = new URL(tmdbLink);
+      const pathParts = url.pathname.split('/').filter(Boolean);
+      const [type, resourceId] = pathParts;
+      const validId = resourceId && /^\\d+$/.test(resourceId) ? resourceId : null;
+      if (!validId) return null;
+
+      if (type === 'movie') {
+        return {
+          tmdbId: validId,
+          mediaType: 'movie' as const,
+          autoPlay: true,
+          color: 'e50914',
+          progress: 0,
+        };
+      }
+
+      if (type === 'tv') {
+        return {
+          tmdbId: validId,
+          mediaType: 'tv' as const,
+          season: Number.isFinite(epNum) ? epNum : 1,
+          episode: epNum,
+          autoPlay: true,
+          nextEpisode: true,
+          episodeSelector: true,
+          color: anime.coverImage?.color?.replace('#', '') || '9146ff',
+          progress: 0,
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }, [anime, epNum]);
+
+  const handleVidkingEvent = (eventData: VidkingPlayerEventData) => {
+    if (eventData.event === 'ended') {
+      handleMarkWatched();
+    }
+  };
 
   useEffect(() => {
     setViewerProgress(getViewerProgress());
     setEpisodeCounted(hasWatchedEpisode(xpAnimeId, epNum));
   }, [xpAnimeId, epNum]);
+
+  useEffect(() => {
+    if (!anime || episodeCounted || !xpAnimeId) return;
+
+    const timer = window.setTimeout(() => {
+      handleMarkWatched();
+    }, 15_000);
+
+    return () => window.clearTimeout(timer);
+  }, [anime, episodeCounted, epNum, xpAnimeId]);
+
+  useEffect(() => {
+    if (!id) return;
+
+    const storageKey = `kuro-comments-${id}-${epNum}`;
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (saved) {
+        setComments(JSON.parse(saved));
+      } else {
+        setComments([]);
+      }
+    } catch {
+      setComments([]);
+    }
+  }, [id, epNum]);
 
   const handleMarkWatched = () => {
     const result = awardWatchedXp(xpAnimeId, epNum);
@@ -120,161 +228,49 @@ export default function WatchPage() {
     updateWatchlistProgress(xpAnimeId, epNum);
   };
 
-  return (
-    <div className="min-h-screen pt-20 px-3 pb-10 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto flex flex-col lg:flex-row gap-5 lg:gap-6">
-      <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-center justify-between mb-4">
-          <Link href={`/anime/${id}`} className="flex items-center gap-2 text-kuro-muted hover:text-white transition-colors group">
-            <ChevronLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-kuro-text line-clamp-1">{title || 'Loading...'}</span>
-              <span className="text-xs text-kuro-primary">Episode {epNum}</span>
-            </div>
-          </Link>
-        </div>
+  const handlePostComment = () => {
+    const trimmed = commentText.trim();
+    if (!trimmed || !id) return;
 
-        <section suppressHydrationWarning className="w-full min-h-[300px] sm:min-h-[420px] bg-kuro-surface rounded-xl border border-kuro-border shadow-card overflow-hidden relative">
-          <div className="absolute inset-0 bg-red-glow opacity-60 pointer-events-none" />
-          <div className="relative z-10 h-full min-h-[300px] p-3 sm:min-h-[420px] sm:p-10 flex flex-col justify-center">
-            {isLoadingAnime || isLoadingStream ? (
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-10 h-10 border-4 border-kuro-primary border-t-transparent rounded-full animate-spin shadow-red-glow" />
-                <p className="text-sm text-kuro-muted font-medium">Preparing your episode...</p>
-              </div>
-            ) : embedUrl ? (
-              <div className="w-full">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h1 className="font-display text-xl sm:text-3xl text-white tracking-wide">
-                      {title} Episode {epNum}
-                    </h1>
-                  </div>
-                  <ShieldCheck className="text-emerald-400 flex-shrink-0" size={28} />
-                </div>
-                <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-kuro-border bg-black shadow-lg">
-                  <iframe
-                    src={embedUrl}
-                    title={`${title} Episode ${epNum}`}
-                    allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                    allowFullScreen
-                    referrerPolicy="strict-origin-when-cross-origin"
-                    className="absolute inset-0 h-full w-full"
-                  />
-                </div>
-              </div>
-            ) : streamSources.length ? (
-              <div className="w-full">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h1 className="font-display text-xl sm:text-3xl text-white tracking-wide">
-                      {title} Episode {epNum}
-                    </h1>
-                    <p className="text-xs text-kuro-muted mt-1">Now playing</p>
-                  </div>
-                  <ShieldCheck className="text-emerald-400 flex-shrink-0" size={28} />
-                </div>
-                <VideoPlayer
-                  sources={streamSources}
-                  poster={anime?.coverImage.large || anime?.coverImage.medium}
-                />
-              </div>
-            ) : error ? (
-              <div className="max-w-xl mx-auto text-center">
-                <AlertTriangle size={36} className="text-amber-400 mx-auto mb-4" />
-                <h1 className="font-display text-3xl text-white tracking-wide mb-2">Stream unavailable</h1>
-                <p className="text-sm text-kuro-muted leading-relaxed">{error.message}</p>
-                <button
-                  onClick={() => retryStream()}
-                  disabled={isFetchingStream}
-                  className="neo-button mx-auto mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-xs font-black uppercase tracking-[0.14em] text-black disabled:opacity-60"
-                >
-                  <RefreshCw size={15} className={isFetchingStream ? 'animate-spin' : ''} />
-                  {isFetchingStream ? 'Retrying' : 'Try again'}
-                </button>
-              </div>
-            ) : (
-              <div className="max-w-xl mx-auto text-center">
-                <Tv size={36} className="text-kuro-primary mx-auto mb-4" />
-                <h1 className="font-display text-3xl text-white tracking-wide mb-2">No stream found</h1>
-                <p className="text-sm text-kuro-muted">
-                  This episode is not available right now. Try another episode or return later.
+    const entry: CommentEntry = {
+      id: Date.now(),
+      author: 'You',
+      text: trimmed,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextComments = [entry, ...comments];
+    setComments(nextComments);
+    setCommentText('');
+
+    const storageKey = `kuro-comments-${id}-${epNum}`;
+    window.localStorage.setItem(storageKey, JSON.stringify(nextComments));
+  };
+
+  return (
+    <div className="min-h-screen pt-20 px-3 pb-10 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_280px]">
+      <aside className="hidden xl:block xl:sticky xl:top-20 xl:self-start">
+        <div className="bg-kuro-surface border border-kuro-border rounded-xl overflow-hidden h-full">
+          <div className="p-4 border-b border-kuro-border">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display text-lg text-kuro-text tracking-wide">Episodes</h2>
+                <p className="text-xs text-kuro-dim mt-1">
+                  {availableEpisodeNumbers.length
+                    ? `${availableEpisodeNumbers.length} available`
+                    : `${totalEps || 'Unknown'} total`}
                 </p>
               </div>
-            )}
-          </div>
-        </section>
-
-        <div className="mt-4 flex flex-col gap-3 p-3 bg-kuro-surface border border-kuro-border rounded-xl xs:flex-row xs:items-center xs:justify-between sm:p-4">
-          <div className="grid grid-cols-2 gap-2 xs:flex">
-            <button
-              onClick={() => router.push(`/watch/${id}/${epNum - 1}`)}
-              disabled={epNum <= 1}
-              className="px-4 py-2 rounded-lg bg-kuro-surface2 text-sm font-medium text-kuro-text hover:bg-kuro-primary hover:text-white disabled:opacity-30 disabled:hover:bg-kuro-surface2 disabled:hover:text-kuro-text transition-all"
-            >
-              Previous
-            </button>
-            <button
-              onClick={() => router.push(`/watch/${id}/${epNum + 1}`)}
-              disabled={totalEps > 0 ? epNum >= totalEps : false}
-              className="px-4 py-2 rounded-lg bg-kuro-surface2 text-sm font-medium text-kuro-text hover:bg-kuro-primary hover:text-white disabled:opacity-30 disabled:hover:bg-kuro-surface2 disabled:hover:text-kuro-text transition-all"
-            >
-              Next
-            </button>
-          </div>
-          <Link
-            href={`/anime/${id}`}
-            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-kuro-muted hover:text-white hover:bg-kuro-surface2 transition-all text-sm font-medium"
-          >
-            <List size={16} /> Details
-          </Link>
-        </div>
-
-        <div className="mt-4 grid gap-3 rounded-xl border border-kuro-border bg-kuro-surface p-4 sm:grid-cols-[1fr_auto] sm:items-center">
-          <div>
-            <div className="flex items-center gap-2">
-              <Trophy size={16} className="text-kuro-primary" />
-              <p className="text-sm font-bold text-white">Viewer Level {viewerProgress?.level || 1}</p>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="inline-flex items-center gap-2 rounded-full border border-kuro-border bg-kuro-surface2 px-3 py-2 text-xs font-semibold text-kuro-text hover:border-kuro-primary hover:text-white hover:bg-kuro-surface3 transition"
+              >
+                <ChevronLeft size={14} /> Back
+              </button>
             </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full bg-white shadow-red-glow transition-all"
-                style={{ width: `${viewerProgress?.progressPercent || 0}%` }}
-              />
-            </div>
-            <p className="mt-2 text-xs text-kuro-muted">
-              {viewerProgress?.currentLevelXp || 0}/{viewerProgress?.nextLevelXp || 120} XP to next level
-              {' '}· {viewerProgress?.watchedCount || 0} episodes counted
-            </p>
           </div>
-          <button
-            type="button"
-            onClick={handleMarkWatched}
-            disabled={episodeCounted}
-            className={cn(
-              'neo-button inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-xs font-black uppercase tracking-[0.14em] transition-all disabled:cursor-not-allowed',
-              episodeCounted
-                ? 'border border-white/10 bg-white/[0.04] text-kuro-muted'
-                : 'bg-white text-black shadow-red-glow hover:bg-white/90',
-            )}
-          >
-            <CheckCircle size={15} />
-            {episodeCounted ? 'Episode counted' : 'Mark watched +35 XP'}
-          </button>
-        </div>
-      </div>
-
-      <aside className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col">
-        <div className="bg-kuro-surface border border-kuro-border rounded-xl flex-1 flex flex-col h-[360px] lg:h-[600px]">
-          <div className="p-4 border-b border-kuro-border">
-            <h2 className="font-display text-lg text-kuro-text tracking-wide">Episodes</h2>
-            <p className="text-xs text-kuro-dim">
-              {availableEpisodeNumbers.length
-                ? `${availableEpisodeNumbers.length} Available Episodes`
-                : `${totalEps || 'Unknown'} Episodes Total`}
-            </p>
-          </div>
-
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+          <div className="h-[calc(100vh-260px)] overflow-y-auto custom-scrollbar p-2">
             {anime && episodeNumbers.map(episode => {
               const isCurrent = episode === epNum;
               return (
@@ -285,7 +281,7 @@ export default function WatchPage() {
                     'flex items-center gap-3 p-3 rounded-lg transition-all mb-1 group',
                     isCurrent
                       ? 'bg-kuro-primary/20 border border-kuro-primary/50 text-kuro-primary font-medium'
-                      : 'hover:bg-kuro-surface2 text-kuro-muted hover:text-white',
+                      : 'bg-kuro-surface3 text-kuro-muted hover:bg-kuro-surface2 hover:text-white',
                   )}
                 >
                   <div className={cn(
@@ -295,13 +291,259 @@ export default function WatchPage() {
                     {episode}
                   </div>
                   <span className="text-sm line-clamp-1">Episode {episode}</span>
-                  {isCurrent && <div className="ml-auto w-2 h-2 rounded-full bg-kuro-primary animate-pulse" />}
                 </Link>
               );
             })}
 
             {!anime && !isLoadingAnime && (
               <p className="text-sm text-kuro-dim text-center py-8">Episode list unavailable</p>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      <main className="flex flex-col gap-5">
+        <div className="bg-kuro-surface rounded-xl border border-kuro-border shadow-card overflow-hidden">
+          <div className="relative aspect-video w-full overflow-hidden bg-black">
+            {isLoadingAnime || isLoadingStream ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                <div className="w-10 h-10 border-4 border-kuro-primary border-t-transparent rounded-full animate-spin shadow-red-glow" />
+              </div>
+            ) : useVidking && vidkingConfig ? (
+              <VidkingPlayer
+                options={vidkingConfig}
+                onPlayerEvent={handleVidkingEvent}
+                className="absolute inset-0 h-full w-full"
+              />
+            ) : embedUrl ? (
+              <iframe
+                src={embedUrl}
+                title={`${title} Episode ${epNum}`}
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                allowFullScreen
+                referrerPolicy="strict-origin-when-cross-origin"
+                className="absolute inset-0 h-full w-full"
+              />
+            ) : streamSources.length ? (
+              <VideoPlayer
+                sources={selectedStreamSource ? [selectedStreamSource] : streamSources}
+                poster={anime?.coverImage.large || anime?.coverImage.medium}
+                fill
+                className="h-full"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/90 text-center p-8">
+                <div>
+                  <p className="text-sm text-kuro-muted">No playable stream available for this episode.</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 rounded-3xl border border-kuro-border bg-kuro-surface2 p-4 shadow-card">
+            <div className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
+              <div className="rounded-2xl bg-kuro-surface3 p-4 border border-kuro-border">
+                <p className="text-sm text-kuro-text">You're watching <span className="font-semibold text-kuro-primary">Episode {epNum}</span>.</p>
+                <p className="mt-2 text-xs text-kuro-dim">If the current server doesn't work, try another server beside.</p>
+              </div>
+
+              <div className="rounded-2xl bg-kuro-surface3 p-4 border border-kuro-border">
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <span className="rounded-full border border-kuro-border bg-kuro-surface px-3 py-1 text-[11px] uppercase tracking-[0.25em] text-kuro-dim">SUB</span>
+                  <span className="rounded-full border border-kuro-border bg-kuro-surface px-3 py-1 text-[11px] uppercase tracking-[0.25em] text-kuro-dim">H-SUB</span>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {streamSources.length ? streamSources.map((source, index) => (
+                    <button
+                      key={`${source.quality}-${index}`}
+                      type="button"
+                      onClick={() => setActiveServerIndex(index)}
+                      className={cn(
+                        'rounded-xl border px-3 py-2 text-sm font-medium transition',
+                        index === activeServerIndex
+                          ? 'border-kuro-primary bg-kuro-primary/15 text-white'
+                          : 'border-kuro-border bg-kuro-surface text-kuro-text hover:border-kuro-primary hover:bg-kuro-surface2 hover:text-white',
+                      )}
+                    >
+                      {source.quality || `Server ${index + 1}`}
+                    </button>
+                  )) : (
+                    <div className="rounded-xl border border-kuro-border bg-kuro-surface px-3 py-2 text-sm text-kuro-dim">No servers found</div>
+                  )}
+
+                  {embedUrl && (
+                    <button
+                      type="button"
+                      className="rounded-xl border border-kuro-border bg-kuro-surface text-kuro-text px-3 py-2 text-sm font-medium hover:border-kuro-primary hover:bg-kuro-surface2 hover:text-white"
+                    >
+                      Embed
+                    </button>
+                  )}
+
+                  {streamSources.some(source => !source.isM3U8) && (
+                    <button
+                      type="button"
+                      className="rounded-xl border border-kuro-border bg-kuro-surface text-kuro-text px-3 py-2 text-sm font-medium hover:border-kuro-primary hover:bg-kuro-surface2 hover:text-white"
+                    >
+                      Download
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h1 className="font-display text-2xl sm:text-3xl text-kuro-text tracking-wide">{title}</h1>
+                <p className="text-xs text-kuro-muted mt-1">Episode {epNum}</p>
+              </div>
+              <p className="text-xs uppercase tracking-[0.2em] text-kuro-dim">
+                {episodeCounted ? 'Auto-counted' : 'Auto-counts after 15s'}
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl bg-kuro-surface2 p-4 border border-kuro-border">
+                <p className="text-xs uppercase tracking-[0.2em] text-kuro-dim mb-2">Progress</p>
+                <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full rounded-full bg-kuro-primary transition-all" style={{ width: `${viewerProgress?.progressPercent || 0}%` }} />
+                </div>
+                <p className="mt-2 text-xs text-kuro-dim">Level {viewerProgress?.level || 1} · {viewerProgress?.watchedCount || 0} episodes counted</p>
+              </div>
+              <div className="rounded-xl bg-kuro-surface2 p-4 border border-kuro-border">
+                <p className="text-xs uppercase tracking-[0.2em] text-kuro-dim mb-2">Episode info</p>
+                <p className="text-sm text-kuro-text">{anime?.format || 'Anime'} · {anime?.seasonYear || 'Unknown year'}</p>
+                <p className="text-sm text-kuro-text mt-1">{anime?.episodes ? `${anime.episodes} episodes` : 'Episode count unknown'}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 overflow-hidden rounded-2xl border border-kuro-border bg-gradient-to-br from-kuro-surface2 via-kuro-surface2 to-kuro-surface/80 shadow-[0_0_0_1px_rgba(255,255,255,0.02)_inset]">
+              <div className="relative">
+                {bannerImage ? (
+                  <div className="relative h-36 w-full sm:h-44">
+                    <Image
+                      src={bannerImage}
+                      alt={`${title} banner`}
+                      fill
+                      className="object-cover"
+                      unoptimized
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
+                    <div className="absolute inset-x-0 bottom-0 p-5">
+                      <div className="flex flex-col gap-1">
+                        <p className="text-[11px] uppercase tracking-[0.3em] text-kuro-dim">Synopsis</p>
+                        <h2 className="font-display text-xl sm:text-2xl text-white tracking-wide">
+                          {title || 'Anime'}
+                        </h2>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="h-5 w-1 rounded-full bg-kuro-primary" />
+                      <h2 className="font-display text-lg text-kuro-text tracking-wide">Synopsis</h2>
+                    </div>
+                  </div>
+                )}
+
+                <div className="px-5 pb-5">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {ratingLabel && (
+                      <span className="rounded-full border border-kuro-primary/40 bg-kuro-primary/15 px-3 py-1 text-xs font-semibold text-kuro-primary backdrop-blur">
+                        {ratingLabel}
+                      </span>
+                    )}
+                    {metadataBadges.map(badge => (
+                      <span key={badge} className="rounded-full border border-kuro-border bg-kuro-surface/90 px-3 py-1 text-xs text-kuro-dim">
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+
+                  <p className="mt-4 text-sm leading-relaxed text-kuro-muted whitespace-pre-line line-clamp-6 sm:line-clamp-none">
+                    {description || 'No synopsis available.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-xl border border-kuro-border bg-kuro-surface2 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-lg text-kuro-text tracking-wide">Comments</h2>
+                  <p className="mt-1 text-xs text-kuro-dim">Share your thoughts on this episode.</p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <textarea
+                  value={commentText}
+                  onChange={(event) => setCommentText(event.target.value)}
+                  rows={3}
+                  placeholder="Write a comment..."
+                  className="w-full rounded-xl border border-kuro-border bg-kuro-surface px-4 py-3 text-sm text-kuro-text outline-none ring-0 placeholder:text-kuro-dim"
+                />
+                <button
+                  type="button"
+                  onClick={handlePostComment}
+                  className="rounded-full border border-kuro-border bg-kuro-surface px-4 py-2 text-sm font-semibold text-kuro-text transition hover:border-kuro-primary hover:text-white"
+                >
+                  Post comment
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {comments.length ? comments.map(comment => (
+                  <div key={comment.id} className="rounded-xl border border-kuro-border bg-kuro-surface p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-kuro-text">{comment.author}</p>
+                      <p className="text-[11px] text-kuro-dim">{new Date(comment.createdAt).toLocaleString()}</p>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-kuro-muted">{comment.text}</p>
+                  </div>
+                )) : (
+                  <p className="text-sm text-kuro-dim">No comments yet. Start the conversation.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col">
+        <div className="bg-kuro-surface border border-kuro-border rounded-xl flex-1 flex flex-col h-[360px] lg:h-[600px]">
+          <div className="p-4 border-b border-kuro-border">
+            <h2 className="font-display text-lg text-kuro-text tracking-wide">Related anime</h2>
+            <p className="text-xs text-kuro-dim mt-1">More titles from this universe.</p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-3">
+            {anime?.relations?.edges?.length ? anime.relations.edges.slice(0, 6).map(edge => (
+              <Link
+                key={edge.node.id}
+                href={`/anime/${edge.node.id}`}
+                className="flex items-center gap-3 rounded-xl border border-kuro-border p-3 transition-all hover:border-kuro-primary hover:bg-kuro-surface2"
+              >
+                <div className="relative h-14 w-10 overflow-hidden rounded-lg bg-kuro-surface3">
+                  <Image
+                    src={edge.node.coverImage.medium || ''}
+                    alt={getTitle(edge.node.title)}
+                    fill
+                    className="object-cover"
+                    unoptimized
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-kuro-text line-clamp-2">{getTitle(edge.node.title)}</p>
+                  <p className="text-[10px] uppercase text-kuro-dim mt-1">{edge.relationType.replace(/_/g, ' ')}</p>
+                </div>
+              </Link>
+            )) : (
+              <p className="text-sm text-kuro-dim">No related titles available.</p>
             )}
           </div>
         </div>

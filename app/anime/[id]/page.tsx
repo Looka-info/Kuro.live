@@ -234,7 +234,7 @@ export default function AnimeDetailPage() {
               className="inline-flex w-full items-center justify-center gap-2 mt-5 px-6 py-3 rounded-xl bg-kuro-primary hover:bg-kuro-primary-hover text-white font-semibold text-sm transition-all red-glow hover:red-glow-lg active:scale-95 sm:w-auto"
             >
               <Play size={18} className="fill-white" />
-              {streamingEpisodeNumbers.length ? 'Watch Available Episodes' : 'Find Where to Watch'}
+              {streamingEpisodeNumbers.length ? 'Watch Now' : 'Find Where to Watch'}
             </Link>
           </div>
         </div>

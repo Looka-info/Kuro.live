@@ -51,6 +51,7 @@ export interface AnikotoAnime {
   alternative?: string;
   titles?: string;
   year?: number | string;
+  terms_by_type?: Record<string, string[]>;
 }
 
 export interface AnikotoEpisode {
@@ -151,6 +152,29 @@ export async function getAnikotoSeries(seriesId: string): Promise<AnikotoSeries>
   };
 }
 
+export async function getAnikotoRecent(
+  page = 1,
+  perPage = 100,
+): Promise<{ data: AnikotoAnime[]; pagination: AnikotoRecentResponse['pagination'] | null }> {
+  const response = await fetch(
+    `${cleanBase(ANIKOTO_BASE)}/recent-anime?page=${page}&per_page=${perPage}`,
+    {
+      headers: { Accept: 'application/json' },
+      next: { revalidate: 300 },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Anikoto returned ${response.status}.`);
+  }
+
+  const body = (await response.json()) as AnikotoRecentResponse;
+  return {
+    data: body.data || [],
+    pagination: body.pagination || null,
+  };
+}
+
 export async function findAnikotoSeries(options: {
   aniId?: number | string | null;
   malId?: number | string | null;
@@ -163,15 +187,8 @@ export async function findAnikotoSeries(options: {
   const maxPages = 8;
 
   for (let page = 1; page <= maxPages; page += 1) {
-    const response = await fetch(`${cleanBase(ANIKOTO_BASE)}/recent-anime?page=${page}&per_page=100`, {
-      headers: { Accept: 'application/json' },
-      next: { revalidate: 900 },
-    });
+    const { data: rows, pagination } = await getAnikotoRecent(page, 100);
 
-    if (!response.ok) break;
-
-    const body = await response.json() as AnikotoRecentResponse;
-    const rows = body.data || [];
     const match = rows.find(row => {
       const rowAni = row.ani_id ? String(row.ani_id) : '';
       const rowMal = row.mal_id ? String(row.mal_id) : '';
@@ -188,7 +205,7 @@ export async function findAnikotoSeries(options: {
       return getAnikotoSeries(String(match.id));
     }
 
-    if (body.pagination?.total_pages && page >= body.pagination.total_pages) break;
+    if (pagination?.total_pages && page >= pagination.total_pages) break;
     if (rows.length < 100) break;
   }
 
@@ -280,7 +297,11 @@ export async function getMegaPlayStream(options: {
     try {
       return await getAnikotoStream(anikotoId, options.episode, language);
     } catch (error) {
-      if (!isRecoverableStreamError(error)) throw error;
+      if (!options.animeId && !options.malId) {
+        if (!isRecoverableStreamError(error)) throw error;
+        throw error;
+      }
+      // If alternate IDs are available, continue to fallback instead of failing immediately.
     }
   }
 

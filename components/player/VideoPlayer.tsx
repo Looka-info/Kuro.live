@@ -11,9 +11,11 @@ interface VideoPlayerProps {
   poster?: string;
   onProgress?: (currentTime: number, duration: number) => void;
   onEnded?: () => void;
+  fill?: boolean;
+  className?: string;
 }
 
-export function VideoPlayer({ sources, poster, onProgress, onEnded }: VideoPlayerProps) {
+export function VideoPlayer({ sources, poster, onProgress, onEnded, fill = false, className }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -29,6 +31,15 @@ export function VideoPlayer({ sources, poster, onProgress, onEnded }: VideoPlaye
   const [showSettings, setShowSettings] = useState(false);
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
+
+  useEffect(() => {
+    if (!currentQuality && sources.length > 0) {
+      setCurrentQuality(sources[0].url);
+    }
+    if (currentQuality && !sources.some(source => source.url === currentQuality) && sources.length > 0) {
+      setCurrentQuality(sources[0].url);
+    }
+  }, [sources, currentQuality]);
 
   useEffect(() => {
     if (!videoRef.current || !currentQuality) return;
@@ -48,6 +59,8 @@ export function VideoPlayer({ sources, poster, onProgress, onEnded }: VideoPlaye
       });
     } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari)
+      videoRef.current.src = currentQuality;
+    } else {
       videoRef.current.src = currentQuality;
     }
 
@@ -172,7 +185,12 @@ export function VideoPlayer({ sources, poster, onProgress, onEnded }: VideoPlaye
       ref={containerRef}
       className={cn(
         'relative bg-black w-full overflow-hidden group',
-        isFullscreen ? 'h-screen' : 'aspect-video rounded-xl shadow-lg border border-kuro-border'
+        isFullscreen
+          ? 'h-screen'
+          : fill
+            ? 'h-full rounded-xl shadow-lg border border-kuro-border'
+            : 'aspect-video rounded-xl shadow-lg border border-kuro-border',
+        className,
       )}
       onClick={(e) => {
         if ((e.target as HTMLElement).tagName !== 'BUTTON' && (e.target as HTMLElement).tagName !== 'INPUT') {

@@ -221,6 +221,23 @@ supabase/migrations/    SQL schema, triggers, XP, comments, and RLS
 | `/api/anime/[id]` | Anime detail enrichment with Anikoto episode availability |
 | `/api/stream` | Safe embed resolver for watch playback |
 
+## Third-party APIs
+
+This app relies on the following backend APIs for anime metadata and playable embeds:
+
+- `AniList` for rich metadata, genres, relations, scores, and season data.
+- `Anikoto` for recent anime listings, show lookup, and episode embed availability.
+- `MegaPlay` for safe HTTPS embed fallbacks when Anikoto embed pages are available.
+
+The Anikoto API is used via `lib/megaplay.ts`:
+
+- `getAnikotoRecent(page, perPage)` fetches `GET https://anikotoapi.site/recent-anime?page={page}&per_page={perPage}` and returns recent anime pages, including optional `terms_by_type` tags.
+- `getAnikotoSeries(id)` fetches `GET https://anikotoapi.site/series/{id}` and returns series metadata plus episode details.
+
+The watch page also includes optional Vidking player support when a TMDB external link exists on the AniList detail. Use `?player=vidking` on `/watch/[id]/[episode]` to enable the Vidking iframe.
+
+Use this API only from server-side code. The app caches backend requests and avoids direct browser calls to preserve rate limits and prevent abuse.
+
 ## Verification
 
 The current cleanup/build pass was checked with:
